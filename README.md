@@ -37,6 +37,17 @@ Furthermore, you are expected to augment, manipulate, clean the data to reach mo
 You can obtain the data itself from the following link: https://www.dropbox.com/s/b19mm1b44anpo6s/traffic-data.csv.gz?dl=0
 The data set contains the following columns:
 
+
+temp.accidents <- data.info %>% filter(rd.rp.stid==8)
+nrow(temp.accidents)
+temp.accidents <- temp.accidents[!duplicated(temp.accidents$report.time.hrs,temp.accidents$rd.nm),]
+data.accidents <- temp.accidents%>%group_by(location)%>%summarise(n=n())%>%arrange(desc(n))
+nrow(data.accidents)
+data.accidents %>% kable()
+ggplot(data = temp.accidents, aes(x=location)) + geom_bar()+labs(title="Accidents")+ geom_bar()+ theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+
 * crawl_date
 * ad.aid
 * ad.bgcl
@@ -84,7 +95,6 @@ Note that looking at the html of bey2ollak.com will prove to be useful :)
 
 
 ## Deliverable
-
 You are expected to submit data analysis report in the form of a R Markdown report showing each step of your work in processing, cleaning, augmenting, and describing the data.
 
 This should be submitted by pushing your work regularly on a repo on github that is forked from https://github.com/saherneklawy/csen1061-project1-traffic-data-analysis

@@ -1,0 +1,280 @@
+---
+title: "traffic-data"
+author: "Mina Sedra"
+date: "April 6, 2016"
+output: html_document
+---
+Installing and adding the Libraies we will use
+```{r,results="hide", warning=FALSE}
+library("dplyr", lib.loc="/Library/Frameworks/R.framework/Versions/3.2/Resources/library")
+library(ggplot2)
+library(plyr)
+library('tm')
+library('wordcloud')
+library(corrgram)
+```
+
+Loading the data 
+```{r, warning=FALSE}
+data <- read.csv(file = '/Users/mina/Desktop/traffic-data.csv')
+```
+
+Cleaning Data:
+
+first removing the constant columns and the NAs
+```{r, warning=FALSE}
+same <- sapply(data, function(.col){all(.col[1L] == .col)})
+same <-as.vector(same)
+same[is.na(same)] <- FALSE
+dataset <- data[!same]
+```
+
+Storing the classes of the columns
+
+```{r, warning=FALSE}
+classes.of.all.columns <- sapply(data, class)
+```
+
+Then removing the duplicates  
+
+```{r, warning=FALSE}
+duplicated_rows = duplicated(dataset$rd.rp.cmid);
+dataset <- dataset[!duplicated_rows,]
+```
+
+Now the Size of the data is 
+
+```{r, warning=FALSE}
+dim(dataset)
+```
+
+Since stid has a meanig
+ stid    meaning
+  6      question
+  7      radar
+  8      accident
+  9      3otl
+  10     attention
+  
+Then replacing the NAs in it is according to the comments
+
+```{r, warning=FALSE}
+question <- is.na(dataset$rd.rp.stid) & (grepl("[?]", dataset$rd.rp.cm, ignore.case=TRUE)|grepl("[؟]", dataset$rd.rp.cm, ignore.case=TRUE))
+dataset$rd.rp.stid[question] <- 6
+
+
+radar <-is.na(dataset$rd.rp.stid) & (grepl("رادار", dataset$rd.rp.cm, ignore.case=TRUE)|grepl("radar", dataset$rd.rp.cm, ignore.case=TRUE))
+dataset$rd.rp.stid[radar] <- 7
+
+
+accident <- is.na(dataset$rd.rp.stid) & (grepl("حادثة", dataset$rd.rp.cm, ignore.case=TRUE)|grepl("حادثه", dataset$rd.rp.cm, ignore.case=TRUE)|grepl("7adsa", dataset$rd.rp.cm, ignore.case=TRUE))
+dataset$rd.rp.stid[accident] <- 8
+
+
+Aotl <- is.na(dataset$rd.rp.stid) & (grepl("3otl", dataset$rd.rp.cm, ignore.case=TRUE)|grepl("عطلانة", dataset$rd.rp.cm, ignore.case=TRUE))
+dataset$rd.rp.stid[Aotl] <- 9
+
+#Adding a vector to say is this report is from bey2ollak
+
+from.GPS.Reporter <-dataset$rd.rp.fullnm == "GPS Reporter"
+from.GPS.Reporter[is.na(from.GPS.Reporter)] <- FALSE
+  
+
+```
+
+Add the boolean vectors to the data 
+
+```{r, warning=FALSE}
+dataset["question"] <- question
+dataset["radar"] <- radar
+dataset["accident"] <- accident
+dataset["Aotl"] <- Aotl
+dataset["Report"] <- from.GPS.Reporter
+
+head(dataset)
+```
+
+Add the time where the report actually issued 
+```{r, warning=FALSE}
+
+#change the crawl date postixct
+dataset$crawl_date <- as.POSIXct(dataset$crawl_date,format = "%a %b  %d %H:%M:%S",tz = "UTC")
+
+#add reported at 
+reported.at <- dataset$crawl_date -(dataset$rd.rp.hr * 60 * 60) - (dataset$rd.rp.mn * 60);
+dataset["reported.at"] <- reported.at;
+
+dataset <- dataset %>% mutate(report.range= format(reported.at, format="%y-%m-%d %H"))
+
+```
+
+And Visualizing the Correlations 
+```{r, warning=FALSE}
+corrgram(dataset, order=NULL, lower.panel=panel.shade,upper.panel=NULL, text.panel=panel.txt,main="coleration")
+```
+
+Divide the road name to 3 cluomns {from , to , through}
+```{r, warning=FALSE}
+splited.str<-t(data.frame(strsplit(as.character(dataset$rd.nm), "[;]")))
+dataset<-dataset%>%mutate(through=splited.str[,1],rd.nm=splited.str[,2])
+
+splited.str <- t(data.frame(strsplit(as.character(dataset$rd.nm), "To")))
+dataset<-dataset%>%mutate(from=splited.str[,1],to=splited.str[,2])
+
+```
+
+So the dataset now looks like 
+```{r, warning=FALSE}
+head(dataset)
+```
+
+As there is no need in our analysis to have (ad.logo,crawl_date,rd.img)
+we will drop them
+
+
+```{r, warning=FALSE}
+
+drops <- c("rd.img","ad.logo","crawl_date","rd.stid","rd.hr","rd.mn","rd.new","rd.strq","rd.cmrq")
+dataset <- dataset[ , !(names(dataset) %in% drops)]
+head(dataset)
+```
+
+
+
+
+Get the speed from the report
+first make new dataset from the GPS Reporters only
+Then add the speed 
+
+```{r, warning=FALSE}
+data.from.GPS.Reporters <- dataset[from.GPS.Reporter,]
+
+pattern.e <-".*\\[(\\d+ km/h)\\].*"
+pattern.a <-".*\\[(\\d+ كم/س)\\].*"
+
+s.e =  gsub(pattern.e, "\\1",dataset$rd.rp.cm[from.GPS.Reporter]) 
+s.a =  gsub(pattern.a, "\\1",dataset$rd.rp.cm[from.GPS.Reporter]) 
+
+s.a[nchar(s.a)>10] <- "0"
+s.a <- as.numeric(gsub("([0-9]+).*$", "\\1", s.a))
+s.a[is.na(s.a)]= 0
+s.e[nchar(s.e)>10] <- "0"
+s.e <- as.numeric(gsub("([0-9]+).*$", "\\1", s.e))
+s.e[is.na(s.e)]= 0
+
+data.from.GPS.Reporters["speed"] <- as.numeric(gsub("([0-9]+).*$", "\\1", s.a)) + as.numeric(gsub("([0-9]+).*$", "\\1", s.e))
+
+head(data.from.GPS.Reporters)
+
+```
+
+To see what the people's most fequent words used to express that the road is 7alawa so we will use
+Function to analyze the comments and get the frequency the words in the comments with specific stid
+```{r, warning=FALSE}
+
+
+comment_analysis <- function(n){
+rdata <- dataset[dataset$rd.rp.stid == n,  ]
+rdata <- rdata[!rdata$Report,]
+review_text <- paste(rdata$rd.rp.cm, collapse=" ")
+
+review_source <- VectorSource(review_text)
+corpus <- Corpus(review_source)
+
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, stripWhitespace)
+corpus <- tm_map(corpus, removeWords, stopwords("english"))
+corpus <- tm_map(corpus, removeWords, c("إلى","شارع","أخد","الطريق","kmh","كم/س","average","speed","لحد"))
+
+dtm <- DocumentTermMatrix(corpus)
+dtm2 <- as.matrix(dtm)
+
+frequency <- colSums(dtm2)
+frequency <- sort(frequency, decreasing=TRUE)
+words <- names(frequency[1:20])
+wordcloud(words[1:20], frequency[1:20])
+return (frequency[1:20])
+}
+```
+
+So for 7alawa
+
+```{r,results="hide", warning=FALSE}
+comment_analysis(1);
+```
+
+And the same for lazeez
+```{r,results="hide", warning=FALSE}
+comment_analysis(2)
+```
+
+
+And for mashy
+```{r,results="hide", warning=FALSE}
+comment_analysis(3)
+```
+
+And for za7ma
+```{r,results="hide", warning=FALSE}
+comment_analysis(4)
+```
+
+And for mafeesh 2amal
+```{r,results="hide", warning=FALSE}
+comment_analysis(5)
+```
+
+Also for radars
+```{r,results="hide", warning=FALSE}
+comment_analysis(7)
+```
+
+And for 3otl
+
+```{r,results="hide", warning=FALSE}
+comment_analysis(9)
+
+
+```
+ 
+ 
+ 
+ Also we can know the top 5 active users
+ 
+```{r,results="hide", warning=FALSE}
+users.count <- table(dataset$rd.rp.fullnm)
+users.count <- sort(users.count, decreasing=TRUE)
+users.count[1:5]
+```
+
+And of course GPS Reporter is the most active user so this histogram only for users 
+```{r,results="hide", warning=FALSE}
+barplot(users.count[2:5], main="Top Active Users")
+```
+
+Now analyse by road so for exapmle we will take "Ghamra To Masged ElNour"
+
+So this is will show a graph the speed vs time for this road and it will color the points according to the report type 
+1 - 7alawa
+2 - lazeez
+3 - mashy
+4 - za7ma
+5 - mafeesh 2amal
+
+```{r,results="hide", warning=FALSE}
+Ghamra_Masged.ElNour = data.from.GPS.Reporters[data.from.GPS.Reporters$rd.nm == "Ghamra To Masged ElNour" ,]
+ggplot(aes(x = Ghamra_Masged.ElNour$report.range, y = Ghamra_Masged.ElNour$speed), data = Ghamra_Masged.ElNour ,labels()) +  geom_point(aes(colour = factor(Ghamra_Masged.ElNour$rd.rp.stid))) + labs(x = "Time",y = "Speed",colour = "Report Type")+expand_limits(x=c(0,30))
+
+```
+
+And for all time 
+
+```{r,results="hide", warning=FALSE}
+Ghamra_Masged.ElNour = dataset[dataset$rd.nm == "Ghamra To Masged ElNour" ,]
+
+ggplot(Ghamra_Masged.ElNour, aes(x=rd.rp.stid )) +
+  geom_histogram(binwidth=.5, alpha=.5, position="identity") + labs(x = "Report type",y = "count",colour = "Report Type")
+
+```
+
